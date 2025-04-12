@@ -1,0 +1,144 @@
+# --- Python ---
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+# Usually these files are written by a python script from a template
+# before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/ # If used for user uploads
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# --- Virtual Environments ---
+venv/
+env/
+.venv/
+.env/
+ENV/
+env.bak/
+venv.bak/
+*/activate
+*/python
+*/pip
+
+# --- Operating System Files ---
+# Mac OS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.DocumentRevisions-V100
+.fseventsd
+.Trashes
+ehthumbs.db # Also Windows, but often seen on Macs with network drives
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# --- IDEs / Editors ---
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Atom
+.atom/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# --- Project Specific ---
+# Add any directories or files specific to this project that should be ignored.
+# For example, the directory where curated files are stored:
+# curated_context/
+# or
+# context_output/
+
+# If you create logs or other temporary files:
+*.log
+*.tmp
+*.bak
+
+# --- Secrets ---
+# Ignore any files containing sensitive information
+# .env
+# secrets.yaml
+# config.prod.json
