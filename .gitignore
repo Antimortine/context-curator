@@ -139,6 +139,4 @@ $RECYCLE.BIN/
 
 # --- Secrets ---
 # Ignore any files containing sensitive information
-# .env
-# secrets.yaml
-# config.prod.json
+.env
