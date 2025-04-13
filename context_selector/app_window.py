@@ -4,7 +4,8 @@ import os
 import traceback # For printing full tracebacks on error
 
 # Import functions from local modules
-from .file_handler import scan_directory_structure, copy_selected_files
+from .file_handler import scan_directory_structure, copy_selected_files, save_tree_file # Added save_tree_file
+# Import config_manager later when needed for load/save defaults
 from .config_manager import load_defaults_config, save_defaults_config
 
 class AppWindow:
@@ -120,7 +121,6 @@ class AppWindow:
         "*.jsx.html",
         ".DS_Store",
         "Thumbs.db",
-        ".context_curator_defaults.json",
     }
 
     def __init__(self, master):
@@ -139,6 +139,7 @@ class AppWindow:
         self.dest_dir_var = tk.StringVar(master=self.master, value="No destination selected")
         self._item_states = {} # Maps Treeview item ID -> bool (checked state)
         self._path_to_item_id = {} # Maps relative path -> Treeview item ID
+        self._scanned_structure = None # Stores result of the last successful scan
 
         # --- Create and Grid the Main Frame ---
         main_frame = ttk.Frame(self.master, padding="10")
@@ -246,6 +247,8 @@ class AppWindow:
         source_dir = self.source_dir_var.get(); dest_dir = self.dest_dir_var.get()
         self.tree.delete(*self.tree.get_children())
         self._item_states.clear(); self._path_to_item_id.clear()
+        self._scanned_structure = None # Reset stored structure
+
         if not source_dir or "No source selected" in source_dir or not os.path.isdir(source_dir): return
 
         ignore_dirs = set(self.DEFAULT_IGNORE_DIR_PATTERNS)
@@ -256,13 +259,18 @@ class AppWindow:
         valid_dest = dest_dir and "No destination selected" not in dest_dir and os.path.exists(dest_dir)
         dest_to_ignore = dest_dir if valid_dest else None
         print(f"Scanning {source_dir} (ignoring dirs:{len(ignore_dirs)}, whitelisting files:{len(whitelist_files)}, blacklisting files:{len(blacklist_files)}, ignoring dest: {dest_to_ignore})...")
+
+        structure = None # Initialize structure
         try:
             structure = scan_directory_structure(
                 source_path=source_dir, ignore_patterns=ignore_dirs,
                 whitelist_patterns=whitelist_files, blacklist_file_patterns=blacklist_files,
                 destination_path=dest_to_ignore
             )
-        except Exception as e: messagebox.showerror("Scanning Error", f"An error occurred while scanning '{source_dir}':\n{e}"); structure = None
+            self._scanned_structure = structure # Store the result on success
+        except Exception as e:
+            messagebox.showerror("Scanning Error", f"An error occurred while scanning '{source_dir}':\n{e}")
+            # Keep self._scanned_structure as None
         print("Scan complete.")
 
         self._initialize_checkbox_images()
@@ -270,8 +278,11 @@ class AppWindow:
         self.tree.tag_configure('unchecked', image=self._get_checkbox_image(False))
         self.tree.tag_configure('placeholder', foreground='gray')
 
-        if structure is not None: self._populate_treeview(structure)
-        elif source_dir: print("Scan returned no structure.")
+        # Populate tree using the stored structure (if scan was successful)
+        if self._scanned_structure is not None:
+            self._populate_treeview(self._scanned_structure)
+        elif source_dir:
+            print("Scan returned no structure or failed.")
 
     # --- Selection Handling ---
     def _handle_click(self, event):
@@ -349,80 +360,49 @@ class AppWindow:
         """Loads default file selections from config file in source directory."""
         print("Load Defaults button clicked")
         source_dir = self.source_dir_var.get()
-        if not source_dir or "No source selected" in source_dir or not os.path.isdir(source_dir):
-             messagebox.showwarning("Load Defaults", "Please select a valid source directory first.")
-             return
+        if not source_dir or "No source selected" in source_dir or not os.path.isdir(source_dir): messagebox.showwarning("Load Defaults", "Please select a valid source directory first."); return
+        if not self._path_to_item_id: messagebox.showinfo("Load Defaults", "Project tree is not populated."); return
 
-        if not self._path_to_item_id: # Check if tree has been populated
-            messagebox.showinfo("Load Defaults", "Project tree is not populated. Please ensure source directory is scanned.")
-            return
-
-        # Call config manager to load paths
         defaults_list = load_defaults_config(source_dir)
-
         if defaults_list is None:
-            # Check if file simply doesn't exist vs. load error
-            config_path = os.path.join(source_dir, ".context_curator_defaults.json") # Assuming this name from config_manager
-            if not os.path.exists(config_path):
-                 messagebox.showinfo("Load Defaults", "No default config file (.context_curator_defaults.json) found in source directory.")
-            else:
-                 messagebox.showerror("Load Defaults", f"Failed to load or parse defaults config file from:\n{source_dir}\n\nCheck console for details.")
+            config_path = os.path.join(source_dir, ".context_curator_defaults.json")
+            if not os.path.exists(config_path): messagebox.showinfo("Load Defaults", "No default config file found.")
+            else: messagebox.showerror("Load Defaults", f"Failed to load defaults config file.\nCheck console for details.")
             return
-        if not defaults_list:
-             messagebox.showinfo("Load Defaults", "No default selections found in the config file.")
-             return
+        if not defaults_list: messagebox.showinfo("Load Defaults", "No default selections found in config file."); return
 
-        print(f"Applying {len(defaults_list)} defaults...")
-        self._clear_selection() # Clear current selection first
-
-        applied_count = 0
-        items_to_update_ancestors_for = set() # Collect items to update ancestors later
-
+        print(f"Applying {len(defaults_list)} defaults..."); self._clear_selection()
+        applied_count = 0; items_to_update_ancestors_for = set()
         for path in defaults_list:
-            is_folder_path = path.endswith(os.sep)
-            clean_path = path.rstrip(os.sep)
+            is_folder_path = path.endswith(os.sep); clean_path = path.rstrip(os.sep)
             item_id = self._path_to_item_id.get(clean_path)
             if item_id:
                 is_tree_item_folder = 'folder' in self.tree.item(item_id, 'tags')
                 if is_folder_path == is_tree_item_folder:
-                    self._set_item_state(item_id, True)
-                    items_to_update_ancestors_for.add(item_id)
+                    self._set_item_state(item_id, True); items_to_update_ancestors_for.add(item_id)
                     if is_tree_item_folder: self._update_descendants_state(item_id, True)
                     applied_count += 1
-                    # print(f"  Applied default: {path}") # Reduce console noise
                 else: print(f"  Skipping default (type mismatch): {path}")
-            else: print(f"  Warning: Default path not found in current tree view: {path}")
-
-        # Update ancestor states efficiently after all items are set
-        print("Updating ancestor states...")
+            else: print(f"  Warning: Default path not found in tree: {path}")
+        print("Updating ancestor states...");
         for item_id in items_to_update_ancestors_for: self._update_ancestors_state(item_id)
         print("Ancestor update complete.")
-
         if applied_count > 0: messagebox.showinfo("Load Defaults", f"Applied {applied_count} default selections.")
-        else: messagebox.showwarning("Load Defaults", "Could not apply any loaded defaults (check paths/tree).")
+        else: messagebox.showwarning("Load Defaults", "Could not apply any loaded defaults.")
 
     # --- UPDATED: _save_defaults ---
     def _save_defaults(self):
         """Saves current file selections as defaults in the source directory."""
         print("Save Defaults button clicked")
         source_dir = self.source_dir_var.get()
-        if not source_dir or "No source selected" in source_dir or not os.path.isdir(source_dir):
-             messagebox.showwarning("Save Defaults", "Please select a valid source directory first.")
-             return
-
+        if not source_dir or "No source selected" in source_dir or not os.path.isdir(source_dir): messagebox.showwarning("Save Defaults", "Please select a valid source directory first."); return
         selected_paths = self._get_selected_paths()
-
         if not selected_paths:
-             if not messagebox.askyesno("Save Defaults", "No items are currently selected.\nDo you want to save an empty default selection?"):
-                 print("Saving empty selection cancelled by user.")
-                 return
+             if not messagebox.askyesno("Save Defaults", "No items selected. Save empty default selection?"): print("Saving empty selection cancelled."); return
              else: print("Saving empty selection as default.")
-
-        # Call config manager to save the paths
         success = save_defaults_config(source_dir, selected_paths)
-
-        if success: messagebox.showinfo("Save Defaults", f"Current selection ({len(selected_paths)} items) saved as default for:\n{source_dir}")
-        else: messagebox.showerror("Save Defaults", f"Failed to save default selection config file in:\n{source_dir}\n\nCheck console for details.")
+        if success: messagebox.showinfo("Save Defaults", f"Selection ({len(selected_paths)} items) saved as default for:\n{source_dir}")
+        else: messagebox.showerror("Save Defaults", f"Failed to save default config file.\nCheck console for details.")
 
     # --- _clear_selection remains the same ---
     def _clear_selection(self):
@@ -434,9 +414,9 @@ class AppWindow:
                 self._set_item_state(item_id, False)
                 if 'folder' in self.tree.item(item_id, 'tags'): self._update_descendants_state(item_id, False)
 
-    # --- _prepare_context remains the same ---
+    # --- UPDATED: _prepare_context ---
     def _prepare_context(self):
-        """Validates inputs, gets confirmation, and calls file_handler.copy_selected_files."""
+        """Validates inputs, gets confirmation, calls copy_selected_files, and saves tree.txt."""
         source_dir = self.source_dir_var.get(); dest_dir = self.dest_dir_var.get()
         # Validation
         if not source_dir or "No source selected" in source_dir or not os.path.isdir(source_dir): messagebox.showerror("Error", "Please select a valid source directory."); return
@@ -445,6 +425,8 @@ class AppWindow:
         # Get Selection
         selected_paths = self._get_selected_paths()
         if not selected_paths: messagebox.showinfo("Prepare Context", "No files or folders selected."); return
+        # Check if scan data is available
+        if self._scanned_structure is None: messagebox.showerror("Error", "Project structure not scanned or scan failed."); return
         # Confirmations
         if not os.path.isdir(dest_dir):
             if not messagebox.askyesno("Create Directory?", f"Destination directory does not exist:\n{dest_dir}\n\nCreate it?", icon='question', default='yes'): print("Destination directory creation cancelled."); return
@@ -468,15 +450,27 @@ class AppWindow:
                 ignore_patterns=ignore_dirs, whitelist_patterns=whitelist_files, blacklist_file_patterns=blacklist_files,
                 clear_dest=should_clear, prepend_path=True
             )
+            # Generate and Save Tree File
+            tree_save_success = False
+            if self._scanned_structure is not None: # Check again in case scan failed but wasn't caught? Unlikely.
+                 tree_save_success = save_tree_file(self._scanned_structure, dest_dir)
+                 if not tree_save_success: errors.append(("tree.txt", "Failed to save filtered tree structure file."))
             # Display Results
             if errors:
-                error_summary = f"Context prepared with {len(errors)} errors.\nCopied {copied_count} files.\n\nFirst few errors:\n"; max_err = 5
+                error_summary = f"Context prepared with {len(errors)} errors.\nCopied {copied_count} files."
+                if not tree_save_success and ("tree.txt", "Failed to save filtered tree structure file.") in errors: error_summary += "\nFailed to save tree.txt."
+                elif tree_save_success: error_summary += "\nGenerated tree.txt."
+                error_summary += "\n\nFirst few errors:\n"; max_err = 5
                 for i, (path, msg) in enumerate(errors):
                     if i < max_err: error_summary += f"- {path}: {msg}\n"
                     elif i == max_err: error_summary += f"... ({len(errors) - max_err} more errors)"; break
                 messagebox.showwarning("Prepare Context Complete (with errors)", error_summary)
-            elif copied_count > 0: messagebox.showinfo("Prepare Context Complete", f"Successfully copied {copied_count} files to:\n{dest_dir}")
-            else: messagebox.showinfo("Prepare Context Complete", "No files were copied.\n(Check selection and filters if unexpected).")
+            elif copied_count > 0:
+                tree_msg = "\nGenerated tree.txt." if tree_save_success else "\nFailed to generate tree.txt."
+                messagebox.showinfo("Prepare Context Complete", f"Successfully copied {copied_count} files to:\n{dest_dir}{tree_msg}")
+            else:
+                 tree_msg = "\nGenerated tree.txt." if tree_save_success else "\nFailed to generate tree.txt."
+                 messagebox.showinfo("Prepare Context Complete", f"No files were copied.\n(Check selection and filters if unexpected).{tree_msg}")
         except Exception as e:
             print(f"FATAL Error during prepare context call: {e}"); traceback.print_exc();
             messagebox.showerror("Prepare Context Failed", f"An unexpected error occurred:\n{e}\n\nCheck console for details.")

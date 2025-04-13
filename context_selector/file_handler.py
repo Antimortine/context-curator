@@ -2,6 +2,7 @@ import os
 import fnmatch # For wildcard matching
 import shutil  # For file copying and directory removal
 import locale  # For fallback encoding detection
+import io
 
 def scan_directory_structure(source_path,
                              ignore_patterns=None,
@@ -254,3 +255,84 @@ def copy_selected_files(source_root, dest_root, selected_relative_paths,
             if i < max_errors_to_show: print(f"  - {path}: {msg}")
             elif i == max_errors_to_show: print(f"  ... ({len(errors) - max_errors_to_show} more errors not shown)"); break
     return copied_count, errors
+
+def generate_tree_string(structure_dict, indent=""):
+    """
+    Recursively generates a string representation of the file/folder structure.
+
+    Args:
+        structure_dict (dict): The nested dictionary from scan_directory_structure.
+        indent (str): The string used for indentation (managed recursively).
+
+    Returns:
+        str: A multi-line string representing the tree structure.
+    """
+    tree_lines = []
+    # Sort items alphabetically, folders first then files
+    sorted_items = sorted(
+        structure_dict.items(),
+        key=lambda item: (isinstance(item[1], dict), item[0].lower())
+    )
+
+    # Use typical tree characters (can be customized)
+    prefix_item = "├── "
+    prefix_last_item = "└── "
+    prefix_indent = "│   "
+    prefix_last_indent = "    "
+
+    count = len(sorted_items)
+    for i, (name, content) in enumerate(sorted_items):
+        is_last = (i == count - 1)
+        prefix = prefix_last_item if is_last else prefix_item
+
+        tree_lines.append(f"{indent}{prefix}{name}")
+
+        if isinstance(content, dict): # It's a folder
+            # Prepare indentation for children
+            child_indent = indent + (prefix_last_indent if is_last else prefix_indent)
+            # Recursively generate subtree
+            subtree = generate_tree_string(content, child_indent)
+            if subtree: # Only add if subtree is not empty
+                tree_lines.append(subtree)
+
+    return "\n".join(tree_lines)
+
+def save_tree_file(structure_dict, dest_root, filename="tree.txt"):
+    """
+    Generates the tree string and saves it to a file in the destination directory.
+
+    Args:
+        structure_dict (dict): The nested dictionary from scan_directory_structure.
+        dest_root (str): The absolute path to the destination directory.
+        filename (str): The name of the tree file to create.
+
+    Returns:
+        bool: True on success, False on failure.
+    """
+    if not structure_dict:
+        print("Cannot generate tree file: structure is empty.")
+        return False
+    if not dest_root or not os.path.isdir(dest_root):
+        print(f"Cannot generate tree file: destination directory is invalid: {dest_root}")
+        return False
+
+    tree_content = generate_tree_string(structure_dict)
+    if not tree_content:
+         print("Generated tree content is empty.")
+         # Decide if you want to save an empty file or not
+         # return True # Or False if empty tree shouldn't create a file
+
+    output_path = os.path.join(dest_root, filename)
+    print(f"Generating tree file: {output_path}")
+
+    try:
+        with io.open(output_path, 'w', encoding='utf-8') as f:
+            f.write(tree_content)
+        print("Tree file generated successfully.")
+        return True
+    except IOError as e:
+        print(f"Error writing tree file: {output_path}\n{e}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error generating tree file: {output_path}\n{e}")
+        return False
