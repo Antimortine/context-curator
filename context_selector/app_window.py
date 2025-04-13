@@ -1,16 +1,14 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, scrolledtext # Import scrolledtext
 import os
 import traceback # For printing full tracebacks on error
 
 # Import functions from local modules
 from .file_handler import scan_directory_structure, copy_selected_files, save_tree_file
-# --- UPDATED IMPORT ---
 from .config_manager import (
     load_defaults_config, save_defaults_config, # Project defaults
     load_app_settings, save_app_settings        # App settings
 )
-# --- END UPDATE ---
 
 class AppWindow:
     """
@@ -78,7 +76,12 @@ class AppWindow:
         "cache",  # Generic cache folder, might be too broad? Review if needed.
         ".cache", # Common Linux cache directory pattern
 
-        # User Added Dirs from previous example
+        # Code coverage reporting
+        ".lcov",
+        ".nyc_output",
+        "coverage"
+
+        # Other
         "chroma_db",
         "logs",
         "temp",
@@ -125,7 +128,6 @@ class AppWindow:
         "*.jsx.html",
         ".DS_Store",
         "Thumbs.db",
-        ".context_curator_defaults.json",
     }
 
     def __init__(self, master):
@@ -156,8 +158,10 @@ class AppWindow:
         # --- Configure Grid Weights for Resizing ---
         self.master.rowconfigure(0, weight=1)
         self.master.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(2, weight=1) # Treeview row expands vertically
-        main_frame.columnconfigure(0, weight=1) # Treeview column expands horizontally
+        # Adjust main_frame grid config slightly for new row
+        main_frame.rowconfigure(2, weight=1) # Treeview row still expands most
+        main_frame.rowconfigure(3, weight=0) # Text area row doesn't expand vertically by default
+        main_frame.columnconfigure(0, weight=1) # Treeview/Text area column expands horizontally
 
         # --- Create Widgets INSIDE main_frame ---
         # 1. Source Directory Selection
@@ -195,9 +199,21 @@ class AppWindow:
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         self.tree.bind("<Button-1>", self._handle_click)
 
-        # 4. Control Buttons Frame
+        # --- ADD: Text Area for Path Input ---
+        text_input_frame = ttk.LabelFrame(main_frame, text="Apply Paths from Text", padding="5")
+        text_input_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 5))
+        text_input_frame.columnconfigure(0, weight=1) # Allow text area to expand horizontally
+
+        self.path_text_area = scrolledtext.ScrolledText(text_input_frame, height=6, width=60, wrap=tk.WORD)
+        self.path_text_area.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0,5))
+
+        apply_text_button = ttk.Button(text_input_frame, text="Apply Paths", command=self._apply_paths_from_text)
+        apply_text_button.grid(row=0, column=1, sticky=(tk.N, tk.E))
+        # --- END ADD ---
+
+        # --- Control Buttons Frame (Adjust row index) ---
         button_frame = ttk.Frame(main_frame, padding="5")
-        button_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.S), pady=(10, 0))
+        button_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.S), pady=(5, 0)) # Row 4
         load_button = ttk.Button(button_frame, text="Load Default", command=self._load_defaults)
         load_button.grid(row=0, column=0, padx=(0, 5))
         save_button = ttk.Button(button_frame, text="Save Default", command=self._save_defaults)
@@ -205,9 +221,9 @@ class AppWindow:
         clear_button = ttk.Button(button_frame, text="Clear Selection", command=self._clear_selection)
         clear_button.grid(row=0, column=2, padx=(0, 5))
 
-        # 5. Prepare Context Button
+        # --- Prepare Context Button (Adjust row index) ---
         prepare_button = ttk.Button(main_frame, text="Prepare Context", command=self._prepare_context)
-        prepare_button.grid(row=3, column=2, sticky=(tk.E, tk.S), pady=(10, 0))
+        prepare_button.grid(row=4, column=2, sticky=(tk.E, tk.S), pady=(5, 0)) # Row 4
 
         # --- Initialize checkbox images ---
         self._initialize_checkbox_images()
@@ -216,34 +232,29 @@ class AppWindow:
         restored_source = self.source_dir_var.get()
         if restored_source and "No source selected" not in restored_source and os.path.isdir(restored_source):
              print(f"Restored source path '{restored_source}', performing initial scan...")
-             self.master.after(50, self._update_treeview) # Use small delay (e.g., 50ms)
+             self.master.after(50, self._update_treeview) # Use small delay
 
     # --- NEW Helper Method ---
     def _load_last_paths(self):
         """Loads last used source and destination paths from app settings."""
         print("Attempting to load last used paths...")
         settings = load_app_settings()
-        if not settings:
-            print("No previous app settings found or failed to load.")
-            return
+        if not settings: print("No previous app settings found or failed to load."); return
 
         last_source = settings.get("last_source_dir")
         last_dest = settings.get("last_dest_dir")
 
-        # Validate paths before setting StringVars
         if last_source and os.path.isdir(last_source):
-            print(f"Restoring last source directory: {last_source}")
-            self.source_dir_var.set(last_source)
+            print(f"Restoring last source directory: {last_source}"); self.source_dir_var.set(last_source)
         else:
-            if last_source: print(f"Last source directory not found or invalid: {last_source}")
-            self.source_dir_var.set("No source selected") # Reset if invalid
+            if last_source:
+                print(f"Last source directory not found or invalid: {last_source}"); self.source_dir_var.set("No source selected")
 
         if last_dest and os.path.isdir(last_dest):
-            print(f"Restoring last destination directory: {last_dest}")
-            self.dest_dir_var.set(last_dest)
+            print(f"Restoring last destination directory: {last_dest}"); self.dest_dir_var.set(last_dest)
         else:
-             if last_dest: print(f"Last destination directory not found or invalid: {last_dest}")
-             self.dest_dir_var.set("No destination selected") # Reset if invalid
+            if last_dest:
+                print(f"Last destination directory not found or invalid: {last_dest}"); self.dest_dir_var.set("No destination selected")
 
     # --- Checkbox Image Handling ---
     def _initialize_checkbox_images(self):
@@ -375,7 +386,6 @@ class AppWindow:
         return selected
 
     # --- Button Actions ---
-    # --- UPDATED: _browse_source_directory ---
     def _browse_source_directory(self):
         """Opens dialog to select source dir, updates tree, and saves path."""
         initial_dir = self.source_dir_var.get()
@@ -384,27 +394,18 @@ class AppWindow:
         if directory:
             print(f"Source directory selected: {directory}")
             self.source_dir_var.set(directory)
-            # Save selected path to app settings
-            current_settings = load_app_settings()
-            current_settings["last_source_dir"] = directory
-            save_app_settings(current_settings)
-            self._update_treeview() # Populate tree after selecting source
+            current_settings = load_app_settings(); current_settings["last_source_dir"] = directory; save_app_settings(current_settings)
+            self._update_treeview()
         else: print("Source directory selection cancelled.")
 
-    # --- UPDATED: _browse_dest_directory ---
     def _browse_dest_directory(self):
         """Opens dialog to select destination dir, potentially updates tree, and saves path."""
         initial_dir = self.dest_dir_var.get()
         if not initial_dir or "No destination selected" in initial_dir or not os.path.isdir(initial_dir): initial_dir = None
         directory = filedialog.askdirectory(title="Select Destination Folder", initialdir=initial_dir)
         if directory:
-            print(f"Destination directory selected: {directory}")
-            old_dest = self.dest_dir_var.get(); self.dest_dir_var.set(directory)
-            # Save selected path to app settings
-            current_settings = load_app_settings()
-            current_settings["last_dest_dir"] = directory
-            save_app_settings(current_settings)
-            # Trigger rescan if destination changes and might affect ignore logic
+            print(f"Destination directory selected: {directory}"); old_dest = self.dest_dir_var.get(); self.dest_dir_var.set(directory)
+            current_settings = load_app_settings(); current_settings["last_dest_dir"] = directory; save_app_settings(current_settings)
             source_dir = self.source_dir_var.get()
             if source_dir and "No source selected" not in source_dir and directory != old_dest:
                  abs_source = os.path.abspath(source_dir); abs_new_dest = os.path.abspath(directory)
@@ -414,7 +415,6 @@ class AppWindow:
                  if new_dest_is_inside or old_dest_was_inside: print("Destination changed and affects source view, updating tree..."); self._update_treeview()
         else: print("Destination directory selection cancelled.")
 
-    # --- UPDATED: _load_defaults ---
     def _load_defaults(self):
         """Loads default file selections from config file in source directory."""
         print("Load Defaults button clicked")
@@ -424,32 +424,44 @@ class AppWindow:
 
         defaults_list = load_defaults_config(source_dir)
         if defaults_list is None:
-            config_path = os.path.join(source_dir, ".context_curator_defaults.json") # Assuming this name
+            config_path = os.path.join(source_dir, ".context_curator_defaults.json")
             if not os.path.exists(config_path): messagebox.showinfo("Load Defaults", "No default config file found.")
             else: messagebox.showerror("Load Defaults", f"Failed to load defaults config file.\nCheck console for details.")
             return
         if not defaults_list: messagebox.showinfo("Load Defaults", "No default selections found in config file."); return
 
         print(f"Applying {len(defaults_list)} defaults..."); self._clear_selection()
-        applied_count = 0; items_to_update_ancestors_for = set()
+        applied_count = 0
+        items_to_update_ancestors_for = set()
+        successfully_applied_item_ids = set() # <-- Keep track of applied IDs
+
         for path in defaults_list:
             is_folder_path = path.endswith(os.sep); clean_path = path.rstrip(os.sep)
             item_id = self._path_to_item_id.get(clean_path)
             if item_id:
                 is_tree_item_folder = 'folder' in self.tree.item(item_id, 'tags')
                 if is_folder_path == is_tree_item_folder:
-                    self._set_item_state(item_id, True); items_to_update_ancestors_for.add(item_id)
+                    self._set_item_state(item_id, True)
+                    items_to_update_ancestors_for.add(item_id)
+                    successfully_applied_item_ids.add(item_id) # <-- Add ID here
                     if is_tree_item_folder: self._update_descendants_state(item_id, True)
                     applied_count += 1
                 else: print(f"  Skipping default (type mismatch): {path}")
             else: print(f"  Warning: Default path not found in tree: {path}")
-        print("Updating ancestor states...");
+
+        print("Updating ancestor states...")
         for item_id in items_to_update_ancestors_for: self._update_ancestors_state(item_id)
         print("Ancestor update complete.")
+
+        # --- ADD: Ensure visibility ---
+        print("Ensuring selected items are visible...")
+        for item_id in successfully_applied_item_ids:
+            self._ensure_visible(item_id)
+        print("Visibility update complete.")
+        # --- END ADD ---
         if applied_count > 0: messagebox.showinfo("Load Defaults", f"Applied {applied_count} default selections.")
         else: messagebox.showwarning("Load Defaults", "Could not apply any loaded defaults.")
 
-    # --- UPDATED: _save_defaults ---
     def _save_defaults(self):
         """Saves current file selections as defaults in the source directory."""
         print("Save Defaults button clicked")
@@ -463,7 +475,6 @@ class AppWindow:
         if success: messagebox.showinfo("Save Defaults", f"Selection ({len(selected_paths)} items) saved as default for:\n{source_dir}")
         else: messagebox.showerror("Save Defaults", f"Failed to save default config file.\nCheck console for details.")
 
-    # --- _clear_selection remains the same ---
     def _clear_selection(self):
         """Clears the current selection in the treeview."""
         print("Clear Selection button clicked");
@@ -473,7 +484,92 @@ class AppWindow:
                 self._set_item_state(item_id, False)
                 if 'folder' in self.tree.item(item_id, 'tags'): self._update_descendants_state(item_id, False)
 
-    # --- _prepare_context remains the same ---
+    # --- ADD NEW Helper Method ---
+    def _ensure_visible(self, item_id):
+        """
+        Ensures a treeview item is visible by expanding its ancestors.
+        """
+        parent_id = self.tree.parent(item_id)
+        while parent_id: # Loop until we reach the root ('')
+            # Check if already open to potentially avoid unnecessary calls (optional)
+            # if not self.tree.item(parent_id, 'open'):
+            #     self.tree.item(parent_id, open=True)
+            # Simpler: just call open=True, it's idempotent if already open
+            try:
+                self.tree.item(parent_id, open=True)
+            except tk.TclError:
+                 # Handle cases where parent_id might be invalid unexpectedly
+                 print(f"Warning: TclError trying to open parent '{parent_id}' for item '{item_id}'")
+                 break # Stop trying to go further up if error occurs
+            parent_id = self.tree.parent(parent_id) # Move to the next parent
+
+    # --- End NEW Helper Method ---
+
+    # --- NEW Method: Apply Paths from Text Area ---
+    def _parse_paths_from_text(self, text_content):
+        """Parses lines of text to extract relative paths, ignoring comments."""
+        paths = set() # Use set to avoid duplicates
+        lines = text_content.splitlines()
+        for line in lines:
+            stripped_line = line.strip()
+            if not stripped_line: continue # Skip empty lines
+            space_index = stripped_line.find(' ')
+            path_part = stripped_line[:space_index].strip() if space_index != -1 else stripped_line
+            if path_part:
+                 normalized_path = path_part.replace('/', os.sep).replace('\\', os.sep) # Normalize to OS sep
+                 paths.add(normalized_path)
+        return list(paths) # Return as a list
+
+    def _apply_paths_from_text(self):
+        """Applies the selection based on paths parsed from the text area."""
+        print("Apply Paths from Text button clicked")
+        source_dir = self.source_dir_var.get()
+        if not source_dir or "No source selected" in source_dir or not os.path.isdir(source_dir): messagebox.showwarning("Apply Paths", "Please select a valid source directory first."); return
+        if not self._path_to_item_id: messagebox.showinfo("Apply Paths", "Project tree is not populated."); return
+
+        text_content = self.path_text_area.get("1.0", tk.END)
+        if not text_content.strip(): messagebox.showinfo("Apply Paths", "Text area is empty."); return
+
+        paths_to_select = self._parse_paths_from_text(text_content)
+        if not paths_to_select: messagebox.showinfo("Apply Paths", "No valid paths found in the text area."); return
+
+        print(f"Applying {len(paths_to_select)} paths from text...")
+        clear_first = messagebox.askyesno("Apply Paths", "Clear existing selection before applying?", default='yes', icon='question')
+        if clear_first: print("Clearing existing selection..."); self._clear_selection()
+
+        applied_count = 0
+        not_found_count = 0
+        items_to_update_ancestors_for = set()
+        successfully_applied_item_ids = set() # <-- Keep track of applied IDs
+        for path in paths_to_select:
+            is_folder_path = path.endswith(os.sep); clean_path = path.rstrip(os.sep)
+            item_id = self._path_to_item_id.get(clean_path)
+            if item_id:
+                self._set_item_state(item_id, True)
+                items_to_update_ancestors_for.add(item_id)
+                successfully_applied_item_ids.add(item_id) # <-- Add ID here
+                if 'folder' in self.tree.item(item_id, 'tags'): self._update_descendants_state(item_id, True)
+                applied_count += 1
+            else: print(f"  Warning: Path from text not found in tree: {path}"); not_found_count += 1
+
+        print("Updating ancestor states...")
+        for item_id in items_to_update_ancestors_for: self._update_ancestors_state(item_id)
+        print("Ancestor update complete.")
+
+        # --- ADD: Ensure visibility ---
+        print("Ensuring selected items are visible...")
+        for item_id in successfully_applied_item_ids:
+            self._ensure_visible(item_id)
+        print("Visibility update complete.")
+        # --- END ADD ---
+
+        summary_message = f"Applied {applied_count} paths from text."
+        if not_found_count > 0: summary_message += f"\nCould not find {not_found_count} paths in the tree."
+        messagebox.showinfo("Apply Paths Complete", summary_message)
+        # Optional: Clear text area after applying?
+        # self.path_text_area.delete("1.0", tk.END)
+
+    # --- Prepare Context Action ---
     def _prepare_context(self):
         """Validates inputs, gets confirmation, calls copy_selected_files, and saves tree.txt."""
         source_dir = self.source_dir_var.get(); dest_dir = self.dest_dir_var.get()
