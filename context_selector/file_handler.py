@@ -36,7 +36,7 @@ def scan_directory_structure(source_path,
     # print(f"DEBUG: Received ignore_patterns count: {len(ignore_patterns)}")
     # print(f"DEBUG: Received whitelist_patterns count: {len(whitelist_patterns)}")
     # print(f"DEBUG: Received blacklist_file_patterns count: {len(blacklist_file_patterns)}")
-    print(f"DEBUG SCAN HANDLER: Received blacklist patterns: {blacklist_file_patterns}")
+    # print(f"DEBUG SCAN HANDLER: Received blacklist patterns: {blacklist_file_patterns}")
     # ---
 
     if not os.path.isdir(source_path):
@@ -60,16 +60,29 @@ def scan_directory_structure(source_path,
         # --- Filter Directories (using ignore_patterns) ---
         original_dirs = list(dirs); dirs[:] = [] # Copy and clear for modification
         for d in original_dirs:
-             is_ignored_by_pattern = any(fnmatch.fnmatch(d, pattern) for pattern in ignore_patterns)
-             # Destination path check
-             current_full_dir_path = os.path.join(root, d)
-             current_rel_path_parts = tuple(os.path.relpath(current_full_dir_path, source_path).split(os.sep))
-             is_dest_path = False
-             if relative_dest_path and len(current_rel_path_parts) <= len(relative_dest_path):
-                  if current_rel_path_parts == relative_dest_path[:len(current_rel_path_parts)]:
-                       is_dest_path = True
-             # Keep directory if not ignored and not destination
-             if not is_ignored_by_pattern and not is_dest_path: dirs.append(d)
+            # Check ignore patterns
+            matched_ignore_pattern = None
+            is_ignored_by_pattern = False
+            for pattern in ignore_patterns:
+                if fnmatch.fnmatch(d, pattern):
+                    is_ignored_by_pattern = True
+                    matched_ignore_pattern = pattern
+                    break # Found a match
+            # Destination path check
+            current_full_dir_path = os.path.join(root, d)
+            current_rel_path_parts = tuple(os.path.relpath(current_full_dir_path, source_path).split(os.sep))
+            is_dest_path = False
+            if relative_dest_path and len(current_rel_path_parts) <= len(relative_dest_path):
+                if current_rel_path_parts == relative_dest_path[:len(current_rel_path_parts)]:
+                    is_dest_path = True
+            # Keep directory if not ignored and not destination
+            if not is_ignored_by_pattern and not is_dest_path:
+                dirs.append(d)
+            else:
+                reason = []
+                if is_ignored_by_pattern: reason.append(f"matches ignore pattern '{matched_ignore_pattern}'")
+                if is_dest_path: reason.append("is (part of) destination path")
+                print(f"DEBUG SCAN HANDLER: Ignoring directory '{d}' in '{current_rel_path_for_debug or '.'}' because it {', '.join(reason)}.")
 
         # --- Filter Files (using Whitelist AND Blacklist) ---
         original_files_in_dir = list(files)

@@ -79,7 +79,7 @@ class AppWindow:
         # Code coverage reporting
         ".lcov",
         ".nyc_output",
-        "coverage"
+        "coverage",
 
         # Other
         "chroma_db",
@@ -477,12 +477,35 @@ class AppWindow:
 
     def _clear_selection(self):
         """Clears the current selection in the treeview."""
-        print("Clear Selection button clicked");
-        if not self._item_states: return
+        print("Clear Selection button clicked")
+        if not self._item_states:
+            print("No items in the tree state to clear.")
+            return # No items to clear
+
+        items_cleared = 0
+        # Iterate through top-level items (direct children of the root '')
         for item_id in self.tree.get_children():
-             if self._item_states.get(item_id, False):
+             # Check if the item exists in our state dictionary AND is currently checked
+             if item_id in self._item_states and self._item_states[item_id]:
+                # Set the state of this top-level item to False
                 self._set_item_state(item_id, False)
-                if 'folder' in self.tree.item(item_id, 'tags'): self._update_descendants_state(item_id, False)
+                items_cleared += 1
+                # --- Explicitly cascade the change downwards ---
+                # Check if it's a folder before trying to update descendants
+                # Use try-except just in case item somehow disappeared
+                try:
+                    if 'folder' in self.tree.item(item_id, 'tags'):
+                        print(f"  Cascading clear for folder: {self.tree.item(item_id, 'text')}")
+                        self._update_descendants_state(item_id, False)
+                except tk.TclError:
+                     print(f"  Warning: Could not access item '{item_id}' during clear cascade.")
+
+        if items_cleared > 0:
+             print(f"Cleared selection state for {items_cleared} top-level items and their descendants.")
+             # Optional: Add a messagebox confirmation?
+             # messagebox.showinfo("Clear Selection", "Selection cleared.")
+        else:
+             print("No items were selected to clear.")
 
     # --- ADD NEW Helper Method ---
     def _ensure_visible(self, item_id):
