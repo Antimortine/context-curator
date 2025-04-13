@@ -4,9 +4,13 @@ import os
 import traceback # For printing full tracebacks on error
 
 # Import functions from local modules
-from .file_handler import scan_directory_structure, copy_selected_files, save_tree_file # Added save_tree_file
-# Import config_manager later when needed for load/save defaults
-from .config_manager import load_defaults_config, save_defaults_config
+from .file_handler import scan_directory_structure, copy_selected_files, save_tree_file
+# --- UPDATED IMPORT ---
+from .config_manager import (
+    load_defaults_config, save_defaults_config, # Project defaults
+    load_app_settings, save_app_settings        # App settings
+)
+# --- END UPDATE ---
 
 class AppWindow:
     """
@@ -121,6 +125,7 @@ class AppWindow:
         "*.jsx.html",
         ".DS_Store",
         "Thumbs.db",
+        ".context_curator_defaults.json",
     }
 
     def __init__(self, master):
@@ -140,6 +145,9 @@ class AppWindow:
         self._item_states = {} # Maps Treeview item ID -> bool (checked state)
         self._path_to_item_id = {} # Maps relative path -> Treeview item ID
         self._scanned_structure = None # Stores result of the last successful scan
+
+        # --- Load Last Used Paths ---
+        self._load_last_paths() # Call helper method
 
         # --- Create and Grid the Main Frame ---
         main_frame = ttk.Frame(self.master, padding="10")
@@ -204,6 +212,38 @@ class AppWindow:
         # --- Initialize checkbox images ---
         self._initialize_checkbox_images()
 
+        # --- Initial Tree Population if Source Path was Restored ---
+        restored_source = self.source_dir_var.get()
+        if restored_source and "No source selected" not in restored_source and os.path.isdir(restored_source):
+             print(f"Restored source path '{restored_source}', performing initial scan...")
+             self.master.after(50, self._update_treeview) # Use small delay (e.g., 50ms)
+
+    # --- NEW Helper Method ---
+    def _load_last_paths(self):
+        """Loads last used source and destination paths from app settings."""
+        print("Attempting to load last used paths...")
+        settings = load_app_settings()
+        if not settings:
+            print("No previous app settings found or failed to load.")
+            return
+
+        last_source = settings.get("last_source_dir")
+        last_dest = settings.get("last_dest_dir")
+
+        # Validate paths before setting StringVars
+        if last_source and os.path.isdir(last_source):
+            print(f"Restoring last source directory: {last_source}")
+            self.source_dir_var.set(last_source)
+        else:
+            if last_source: print(f"Last source directory not found or invalid: {last_source}")
+            self.source_dir_var.set("No source selected") # Reset if invalid
+
+        if last_dest and os.path.isdir(last_dest):
+            print(f"Restoring last destination directory: {last_dest}")
+            self.dest_dir_var.set(last_dest)
+        else:
+             if last_dest: print(f"Last destination directory not found or invalid: {last_dest}")
+             self.dest_dir_var.set("No destination selected") # Reset if invalid
 
     # --- Checkbox Image Handling ---
     def _initialize_checkbox_images(self):
@@ -254,7 +294,7 @@ class AppWindow:
         ignore_dirs = set(self.DEFAULT_IGNORE_DIR_PATTERNS)
         whitelist_files = set(self.DEFAULT_WHITELIST_FILE_PATTERNS)
         blacklist_files = set(self.DEFAULT_BLACKLIST_FILE_PATTERNS)
-        print(f"DEBUG (app_window): Preparing scan. Ignore Dirs: {len(ignore_dirs)}, Whitelist Files: {len(whitelist_files)}, Blacklist Files: {len(blacklist_files)}")
+        # print(f"DEBUG (app_window): Preparing scan. Ignore Dirs: {len(ignore_dirs)}, Whitelist Files: {len(whitelist_files)}, Blacklist Files: {len(blacklist_files)}")
 
         valid_dest = dest_dir and "No destination selected" not in dest_dir and os.path.exists(dest_dir)
         dest_to_ignore = dest_dir if valid_dest else None
@@ -335,17 +375,36 @@ class AppWindow:
         return selected
 
     # --- Button Actions ---
+    # --- UPDATED: _browse_source_directory ---
     def _browse_source_directory(self):
-        """Opens dialog to select source dir and updates tree."""
-        directory = filedialog.askdirectory(title="Select Source Project Folder", initialdir=self.source_dir_var.get() if os.path.isdir(self.source_dir_var.get()) else None)
-        if directory: print(f"Source directory selected: {directory}"); self.source_dir_var.set(directory); self._update_treeview()
+        """Opens dialog to select source dir, updates tree, and saves path."""
+        initial_dir = self.source_dir_var.get()
+        if not initial_dir or "No source selected" in initial_dir or not os.path.isdir(initial_dir): initial_dir = None
+        directory = filedialog.askdirectory(title="Select Source Project Folder", initialdir=initial_dir)
+        if directory:
+            print(f"Source directory selected: {directory}")
+            self.source_dir_var.set(directory)
+            # Save selected path to app settings
+            current_settings = load_app_settings()
+            current_settings["last_source_dir"] = directory
+            save_app_settings(current_settings)
+            self._update_treeview() # Populate tree after selecting source
         else: print("Source directory selection cancelled.")
 
+    # --- UPDATED: _browse_dest_directory ---
     def _browse_dest_directory(self):
-        """Opens dialog to select destination dir and potentially updates tree."""
-        directory = filedialog.askdirectory(title="Select Destination Folder", initialdir=self.dest_dir_var.get() if os.path.isdir(self.dest_dir_var.get()) else None)
+        """Opens dialog to select destination dir, potentially updates tree, and saves path."""
+        initial_dir = self.dest_dir_var.get()
+        if not initial_dir or "No destination selected" in initial_dir or not os.path.isdir(initial_dir): initial_dir = None
+        directory = filedialog.askdirectory(title="Select Destination Folder", initialdir=initial_dir)
         if directory:
-            print(f"Destination directory selected: {directory}"); old_dest = self.dest_dir_var.get(); self.dest_dir_var.set(directory)
+            print(f"Destination directory selected: {directory}")
+            old_dest = self.dest_dir_var.get(); self.dest_dir_var.set(directory)
+            # Save selected path to app settings
+            current_settings = load_app_settings()
+            current_settings["last_dest_dir"] = directory
+            save_app_settings(current_settings)
+            # Trigger rescan if destination changes and might affect ignore logic
             source_dir = self.source_dir_var.get()
             if source_dir and "No source selected" not in source_dir and directory != old_dest:
                  abs_source = os.path.abspath(source_dir); abs_new_dest = os.path.abspath(directory)
@@ -365,7 +424,7 @@ class AppWindow:
 
         defaults_list = load_defaults_config(source_dir)
         if defaults_list is None:
-            config_path = os.path.join(source_dir, ".context_curator_defaults.json")
+            config_path = os.path.join(source_dir, ".context_curator_defaults.json") # Assuming this name
             if not os.path.exists(config_path): messagebox.showinfo("Load Defaults", "No default config file found.")
             else: messagebox.showerror("Load Defaults", f"Failed to load defaults config file.\nCheck console for details.")
             return
@@ -414,7 +473,7 @@ class AppWindow:
                 self._set_item_state(item_id, False)
                 if 'folder' in self.tree.item(item_id, 'tags'): self._update_descendants_state(item_id, False)
 
-    # --- UPDATED: _prepare_context ---
+    # --- _prepare_context remains the same ---
     def _prepare_context(self):
         """Validates inputs, gets confirmation, calls copy_selected_files, and saves tree.txt."""
         source_dir = self.source_dir_var.get(); dest_dir = self.dest_dir_var.get()
@@ -425,7 +484,7 @@ class AppWindow:
         # Get Selection
         selected_paths = self._get_selected_paths()
         if not selected_paths: messagebox.showinfo("Prepare Context", "No files or folders selected."); return
-        # Check if scan data is available
+        # Check Scan Data
         if self._scanned_structure is None: messagebox.showerror("Error", "Project structure not scanned or scan failed."); return
         # Confirmations
         if not os.path.isdir(dest_dir):
@@ -450,9 +509,9 @@ class AppWindow:
                 ignore_patterns=ignore_dirs, whitelist_patterns=whitelist_files, blacklist_file_patterns=blacklist_files,
                 clear_dest=should_clear, prepend_path=True
             )
-            # Generate and Save Tree File
+            # Generate Tree File
             tree_save_success = False
-            if self._scanned_structure is not None: # Check again in case scan failed but wasn't caught? Unlikely.
+            if self._scanned_structure is not None:
                  tree_save_success = save_tree_file(self._scanned_structure, dest_dir)
                  if not tree_save_success: errors.append(("tree.txt", "Failed to save filtered tree structure file."))
             # Display Results
