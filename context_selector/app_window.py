@@ -198,7 +198,16 @@ class AppWindow:
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.tree.xview)
         hsb.grid(row=1, column=0, sticky=(tk.W, tk.E))
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        self.tree.bind("<Button-1>", self._handle_click)
+        
+        # Remove the default selection behavior completely
+        self.tree.configure(selectmode='none')
+        
+        # Bind click events but not for the normal selection behavior
+        self.tree.unbind("<Button-1>")
+        
+        # Custom bindings for select (item) vs expand (button) behaviors
+        # First let the default handler process the event
+        self.tree.bind("<ButtonRelease-1>", self._handle_click)
 
         # --- ADD: Text Area for Path Input ---
         text_input_frame = ttk.LabelFrame(main_frame, text="Apply Paths from Text", padding="5")
@@ -338,14 +347,46 @@ class AppWindow:
 
     # --- Selection Handling ---
     def _handle_click(self, event):
-        """Handles left-clicks on tree items to toggle their selection state."""
-        region = self.tree.identify_region(event.x, event.y);
-        if region != "tree": return
+        """Handles left-clicks on tree items to toggle their selection state.
+        This is triggered on ButtonRelease to separate from the expand/collapse behavior.
+        """
+        # Check what was clicked - we need both element and region
+        element = self.tree.identify_element(event.x, event.y)
+        region = self.tree.identify_region(event.x, event.y)
+        
+        # Skip if we clicked on buttons, indicators, or non-tree regions
+        # The expand/collapse will already have happened by ButtonRelease time
+        if element in ('image', 'indicator') or region != 'tree':
+            return
+        
+        # Get the tree item that was clicked
         item_id = self.tree.identify_row(event.y)
-        if not item_id or 'placeholder' in self.tree.item(item_id, 'tags'): return
-        current_state = self._item_states.get(item_id, False); new_state = not current_state
+        if not item_id or 'placeholder' in self.tree.item(item_id, 'tags'):
+            return
+        
+        # Calculate the distance from the left edge to check if we clicked near the button
+        # This is an additional check to avoid selection on button area
+        col_id = self.tree.identify_column(event.x)
+        if col_id == '#0':  # The first tree column with expand/collapse buttons
+            item_bbox = self.tree.bbox(item_id, column='#0')
+            if item_bbox:
+                # If we clicked too close to the left margin where buttons are, skip
+                left_margin = 25  # Approximate width of the button area
+                if event.x < (item_bbox[0] + left_margin):
+                    return
+        
+        # Toggle the current state
+        current_state = self._item_states.get(item_id, False)
+        new_state = not current_state
+        
+        # Update the item's state
         self._set_item_state(item_id, new_state)
-        if 'folder' in self.tree.item(item_id, 'tags'): self._update_descendants_state(item_id, new_state)
+        
+        # If this is a folder, update all descendants
+        if 'folder' in self.tree.item(item_id, 'tags'):
+            self._update_descendants_state(item_id, new_state)
+            
+        # Update parent folder states
         self._update_ancestors_state(item_id)
 
     def _set_item_state(self, item_id, checked):
