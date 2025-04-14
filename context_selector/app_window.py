@@ -129,6 +129,7 @@ class AppWindow:
         "*.jsx.html",
         ".DS_Store",
         "Thumbs.db",
+        ".context_curator_defaults.json"
     }
 
     def __init__(self, master):
