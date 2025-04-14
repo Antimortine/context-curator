@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext # Import scrolledtext
 import os
 import traceback # For printing full tracebacks on error
+import pyperclip  # For copying text to clipboard
 
 # Import functions from local modules
 from .file_handler import scan_directory_structure, copy_selected_files, save_tree_file
@@ -349,11 +350,27 @@ class AppWindow:
 
     def _set_item_state(self, item_id, checked):
         """Sets the visual and internal state of a tree item."""
-        if item_id not in self._item_states: return
-        self._item_states[item_id] = checked
-        tags = list(self.tree.item(item_id, 'tags')); base_tag = tags[0]
-        state_tag = 'checked' if checked else 'unchecked'
-        if 'placeholder' not in tags: self.tree.item(item_id, tags=(base_tag, state_tag))
+        try:
+            # Update the state in the dictionary even if it wasn't there before
+            self._item_states[item_id] = checked
+            # Get the current tags and extract the base tag (first tag)
+            tags = list(self.tree.item(item_id, 'tags'))
+            # Skip invalid items or items that no longer exist
+            if not tags:
+                return
+            
+            base_tag = tags[0]
+            state_tag = 'checked' if checked else 'unchecked'
+            
+            # Only update visual state for non-placeholder items
+            if 'placeholder' not in tags:
+                self.tree.item(item_id, tags=(base_tag, state_tag))
+        except tk.TclError:
+            # Handle case where the item no longer exists in the tree
+            print(f"Warning: Could not update state for item {item_id} (may have been removed)")
+            # Remove the item from our state tracking if it no longer exists
+            if item_id in self._item_states:
+                del self._item_states[item_id]
 
     def _update_descendants_state(self, item_id, checked):
         """Recursively updates the state of all descendant items."""
@@ -482,30 +499,35 @@ class AppWindow:
             print("No items in the tree state to clear.")
             return # No items to clear
 
+        # Make a copy of item_states since we'll be modifying it during iteration
+        items_to_clear = {}
+        for item_id, is_selected in self._item_states.items():
+            if is_selected:
+                items_to_clear[item_id] = True
+
+        if not items_to_clear:
+            print("No items were selected to clear.")
+            return
+        
         items_cleared = 0
         # Iterate through top-level items (direct children of the root '')
         for item_id in self.tree.get_children():
-             # Check if the item exists in our state dictionary AND is currently checked
-             if item_id in self._item_states and self._item_states[item_id]:
-                # Set the state of this top-level item to False
-                self._set_item_state(item_id, False)
-                items_cleared += 1
-                # --- Explicitly cascade the change downwards ---
-                # Check if it's a folder before trying to update descendants
-                # Use try-except just in case item somehow disappeared
-                try:
-                    if 'folder' in self.tree.item(item_id, 'tags'):
-                        print(f"  Cascading clear for folder: {self.tree.item(item_id, 'text')}")
-                        self._update_descendants_state(item_id, False)
-                except tk.TclError:
-                     print(f"  Warning: Could not access item '{item_id}' during clear cascade.")
+            # Set the state of this top-level item to False regardless of current state
+            # This ensures all items get cleared even if tracking is inconsistent
+            self._set_item_state(item_id, False)
+            items_cleared += 1
+            
+            # --- Explicitly cascade the change downwards ---
+            try:
+                if 'folder' in self.tree.item(item_id, 'tags'):
+                    print(f"  Cascading clear for folder: {self.tree.item(item_id, 'text')}")
+                    self._update_descendants_state(item_id, False)
+            except tk.TclError:
+                print(f"  Warning: Could not access item '{item_id}' during clear cascade.")
 
-        if items_cleared > 0:
-             print(f"Cleared selection state for {items_cleared} top-level items and their descendants.")
-             # Optional: Add a messagebox confirmation?
-             # messagebox.showinfo("Clear Selection", "Selection cleared.")
-        else:
-             print("No items were selected to clear.")
+        # Add confirmation message
+        print(f"Cleared selection state for {items_cleared} top-level items and their descendants.")
+        messagebox.showinfo("Clear Selection", "Selection cleared.")
 
     # --- ADD NEW Helper Method ---
     def _ensure_visible(self, item_id):
@@ -561,7 +583,7 @@ class AppWindow:
         if clear_first: print("Clearing existing selection..."); self._clear_selection()
 
         applied_count = 0
-        not_found_count = 0
+        not_found_paths = []  # Keep a list of paths that weren't found
         items_to_update_ancestors_for = set()
         successfully_applied_item_ids = set() # <-- Keep track of applied IDs
         for path in paths_to_select:
@@ -573,7 +595,9 @@ class AppWindow:
                 successfully_applied_item_ids.add(item_id) # <-- Add ID here
                 if 'folder' in self.tree.item(item_id, 'tags'): self._update_descendants_state(item_id, True)
                 applied_count += 1
-            else: print(f"  Warning: Path from text not found in tree: {path}"); not_found_count += 1
+            else:
+                print(f"  Warning: Path from text not found in tree: {path}")
+                not_found_paths.append(path)  # Add to the failed paths list
 
         print("Updating ancestor states...")
         for item_id in items_to_update_ancestors_for: self._update_ancestors_state(item_id)
@@ -587,8 +611,16 @@ class AppWindow:
         # --- END ADD ---
 
         summary_message = f"Applied {applied_count} paths from text."
-        if not_found_count > 0: summary_message += f"\nCould not find {not_found_count} paths in the tree."
-        messagebox.showinfo("Apply Paths Complete", summary_message)
+        
+        # Show failed paths in a copyable dialog if any exist
+        if not_found_paths:
+            summary_message += f"\nCould not find {len(not_found_paths)} paths in the tree."
+            # First show the regular summary message
+            messagebox.showinfo("Apply Paths Complete", summary_message)
+            # Then show the detailed error dialog with copyable paths
+            PathErrorDialog(self.master, "Failed Paths", not_found_paths)
+        else:
+            messagebox.showinfo("Apply Paths Complete", summary_message)
         # Optional: Clear text area after applying?
         # self.path_text_area.delete("1.0", tk.END)
 
@@ -654,3 +686,68 @@ class AppWindow:
             messagebox.showerror("Prepare Context Failed", f"An unexpected error occurred:\n{e}\n\nCheck console for details.")
 
 # --- End of AppWindow class ---
+
+class PathErrorDialog(tk.Toplevel):
+    """A dialog to display paths that failed to be applied, with copy functionality."""
+    def __init__(self, parent, title, failed_paths):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("600x400")
+        self.transient(parent)  # Set to be on top of the parent window
+        self.grab_set()  # Modal behavior
+        
+        # Create the main frame
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create a label
+        label = ttk.Label(main_frame, text=f"The following {len(failed_paths)} paths could not be found:")
+        label.pack(anchor=tk.W, pady=(0, 5))
+        
+        # Create a text widget to display the failed paths
+        self.text_widget = scrolledtext.ScrolledText(main_frame, wrap=tk.WORD, width=70, height=15)
+        self.text_widget.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # Insert all the failed paths into the text widget
+        for path in failed_paths:
+            self.text_widget.insert(tk.END, f"{path}\n")
+        
+        # Make the text widget read-only but still allow copy operations
+        self.text_widget.configure(state="disabled")
+        
+        # Add a button frame at the bottom
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, expand=False)
+        
+        # Add a "Copy All" button
+        copy_button = ttk.Button(button_frame, text="Copy All", command=self._copy_all_paths)
+        copy_button.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Add a "Close" button
+        close_button = ttk.Button(button_frame, text="Close", command=self.destroy)
+        close_button.pack(side=tk.RIGHT)
+        
+        # Center the dialog on the parent window
+        self.update_idletasks()
+        self._center_on_parent()
+        
+        # Wait for the window to be dismissed before returning
+        self.wait_window()
+    
+    def _copy_all_paths(self):
+        """Copy all the paths to the clipboard."""
+        # Get all the text from the text widget
+        text = self.text_widget.get("1.0", tk.END)
+        try:
+            # Copy to clipboard using pyperclip
+            pyperclip.copy(text)
+            messagebox.showinfo("Copy", "All paths copied to clipboard!")
+        except Exception as e:
+            messagebox.showerror("Copy Failed", f"Failed to copy to clipboard: {e}")
+    
+    def _center_on_parent(self):
+        """Center the dialog on the parent window."""
+        parent = self.master
+        x = parent.winfo_rootx() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
+        y = parent.winfo_rooty() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
+        self.geometry(f"+{x}+{y}")

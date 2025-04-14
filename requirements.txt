@@ -1,0 +1,11 @@
+# Context Curator - Requirements
+# This file lists all dependencies needed to run the application
+
+# External dependencies
+pyperclip>=1.9.0    # Used for clipboard operations
+
+# Note: Most dependencies are from Python's standard library:
+# - tkinter - GUI framework
+# - os, shutil, pathlib - File operations
+# - json - Config file handling
+# - fnmatch - Pattern matching
