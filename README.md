@@ -137,3 +137,10 @@ Contributions are welcome! Please feel free to open an issue or submit a pull re
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Author / Contact
+
+Context Curator is developed and maintained by Antimortine (Andrey Kopnin).
+- GitHub: [@Antimortine](https://github.com/Antimortine)
+- Website/Portfolio: [antimortine.github.io](https://antimortine.github.io/)
+- LinkedIn: [Andrey Kopnin](https://www.linkedin.com/in/andrey-kopnin-9451091b1/)
